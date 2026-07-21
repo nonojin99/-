@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>수박게임</title>
+<link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Jua', sans-serif;
+    background: linear-gradient(180deg, #ffe9c7 0%, #ffd9a0 100%);
+    display: flex; flex-direction: column; align-items: center;
+    overflow: hidden; touch-action: none; user-select: none;
+  }
+  #topbar {
+    width: 100%; max-width: 480px;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 14px 4px; color: #7a4a12;
+  }
+  .scorebox { text-align: center; line-height: 1.1; }
+  .scorebox .label { font-size: 12px; opacity: .7; }
+  .scorebox .val { font-size: 26px; }
+  #nextbox { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  #nextFruit { font-size: 28px; }
+  #stage { position: relative; flex: 1; width: 100%; max-width: 480px; display: flex; justify-content: center; align-items: flex-start; }
+  canvas { display: block; border-radius: 0 0 18px 18px; }
+  #overlay {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(60, 30, 0, .55); border-radius: 0 0 18px 18px;
+  }
+  #overlay.show { display: flex; }
+  #panel {
+    background: #fff8e7; border-radius: 16px; padding: 22px 26px;
+    width: min(320px, 86%); text-align: center; color: #7a4a12;
+    box-shadow: 0 10px 30px rgba(0,0,0,.3);
+  }
+  #panel h2 { font-size: 30px; margin-bottom: 4px; }
+  #panel .final { font-size: 18px; margin-bottom: 14px; }
+  #panel input {
+    font-family: inherit; font-size: 16px; width: 100%;
+    padding: 8px 10px; border: 2px solid #e8c78f; border-radius: 10px;
+    margin-bottom: 8px; text-align: center; background: #fff;
+  }
+  #panel button {
+    font-family: inherit; font-size: 16px; cursor: pointer;
+    padding: 9px 18px; border: none; border-radius: 10px;
+    background: #e0533d; color: #fff; margin: 3px;
+  }
+  #panel button.sub { background: #58a05c; }
+  #panel button:disabled { opacity: .5; }
+  #ranking { margin-top: 12px; text-align: left; font-size: 14px; max-height: 180px; overflow-y: auto; }
+  #ranking .row { display: flex; justify-content: space-between; padding: 3px 6px; border-radius: 6px; }
+  #ranking .row:nth-child(odd) { background: #f7ecd4; }
+  #ranking .me { background: #ffd88a !important; }
+  #lbmsg { font-size: 12px; opacity: .7; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="scorebox"><div class="label">점수</div><div class="val" id="score">0</div></div>
+  <div id="nextbox">다음 <span id="nextFruit">🍒</span></div>
+  <div class="scorebox"><div class="label">최고</div><div class="val" id="best">0</div></div>
+</div>
+<div id="stage">
+  <canvas id="game"></canvas>
+  <div id="overlay">
+    <div id="panel">
+      <h2 id="ovTitle">게임 오버</h2>
+      <div class="final" id="ovScore"></div>
+      <div id="lbArea">
+        <input id="nick" maxlength="12" placeholder="닉네임 (최대 12자)">
+        <button class="sub" id="submitBtn">랭킹 등록</button>
+      </div>
+      <button id="restartBtn">다시 하기</button>
+      <div id="ranking"></div>
+      <div id="lbmsg"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+<script>
+(() => {
+  // ===== Supabase 설정 — 2048 때와 동일 패턴. 아래 두 값만 채우면 리더보드 활성화 =====
+  const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+  const SUPABASE_KEY = 'YOUR_PUBLISHABLE_KEY';
+  const LB_TABLE = 'suika_rankings';
+  const LB_ENABLED = !SUPABASE_URL.includes('YOUR-PROJECT');
+
+  const { Engine, Bodies, Body, World, Events } = Matter;
+
+  // ===== 보드/과일 상수 =====
+  const W = 620, H = 850;          // 논리 캔버스 (CSS로 축소)
+  const WALL = 14;                  // 벽 두께
+  const DEADLINE = 130;             // 게임오버 라인 y
+  const DROP_Y = 90;                // 드롭 대기 높이
+  const FRUITS = [
+    { name: '체리',     emoji: '🍒', r: 26,  color: '#e63946' },
+    { name: '딸기',     emoji: '🍓', r: 34,  color: '#f25c78' },
+    { name: '포도',     emoji: '🍇', r: 44,  color: '#8e5bd6' },
+    { name: '귤',       emoji: '🍊', r: 52,  color: '#ffb347' },
+    { name: '감',       emoji: '🍅', r: 64,  color: '#ff7b3d' },
+    { name: '사과',     emoji: '🍎', r: 78,  color: '#d62828' },
+    { name: '배',       emoji: '🍐', r: 92,  color: '#c9d65c' },
+    { name: '복숭아',   emoji: '🍑', r: 110, color: '#ffb0a0' },
+    { name: '파인애플', emoji: '🍍', r: 128, color: '#f4c542' },
+    { name: '멜론',     emoji: '🍈', r: 150, color: '#a8d47a' },
+    { name: '수박',     emoji: '🍉', r: 175, color: '#3a7d44' },
+  ];
+  const MAX_LEVEL = FRUITS.length - 1;
+  const DROPPABLE = 5;                                  // 1~5단계만 드롭 등장
+  const mergeScore = lv => lv * (lv + 1) / 2;           // 삼각수: 결과 단계 lv 생성 시 점수
+  const WATERMELON_BONUS = 100;
+
+  // ===== 캔버스 =====
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  canvas.width = W; canvas.height = H;
+  function layout() {
+    const stage = document.getElementById('stage');
+    const s = Math.min(stage.clientWidth / W, stage.clientHeight / H);
+    canvas.style.width = W * s + 'px';
+    canvas.style.height = H * s + 'px';
+  }
+  window.addEventListener('resize', layout);
+
+  // ===== 물리 세계 =====
+  const engine = Engine.create();
+  const world = engine.world;
+  engine.gravity.y = 1.1;
+  const wallOpt = { isStatic: true, friction: 0.4, render: {} };
+  World.add(world, [
+    Bodies.rectangle(W / 2, H + 40, W + 200, 80 + WALL * 2, wallOpt),        // 바닥
+    Bodies.rectangle(-40 + WALL / 2, H / 2, 80, H * 2, wallOpt),             // 왼벽
+    Bodies.rectangle(W + 40 - WALL / 2, H / 2, 80, H * 2, wallOpt),          // 오른벽
+  ]);
+
+  // ===== 상태 =====
+  let score = 0, best = 0, over = false;
+  let currentLv = 0, nextLv = 0;
+  let aimX = W / 2;
+  let canDrop = true;
+  let overTimer = 0;           // 데드라인 위 체류 누적(ms)
+  let lastTime = 0;
+  let effects = [];            // 합체 이펙트
+
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const nextEl = document.getElementById('nextFruit');
+
+  // 최고점수 — localStorage 실패 시 메모리 폴백 (2048과 동일)
+  let memBest = 0;
+  function loadBest() {
+    try { best = parseInt(localStorage.getItem('suika_best') || '0', 10); }
+    catch { best = memBest; }
+    bestEl.textContent = best;
+  }
+  function saveBest() {
+    if (score <= best) return;
+    best = score; bestEl.textContent = best;
+    try { localStorage.setItem('suika_best', String(best)); } catch { memBest = best; }
+  }
+
+  // ===== 과일 생성 =====
+  function spawnFruit(x, y, lv, fromMerge) {
+    const f = FRUITS[lv];
+    const body = Bodies.circle(x, y, f.r, {
+      restitution: 0.15, friction: 0.4, density: 0.0012,
+      label: 'fruit',
+    });
+    body.level = lv;
+    body.merged = false;          // 이중 합체 가드
+    body.bornAt = performance.now();
+    body.touched = fromMerge;     // 합체 생성물은 즉시 판정 대상
+    World.add(world, body);
+    return body;
+  }
+
+  function pickNext() { return Math.floor(Math.random() * DROPPABLE); }
+
+  function drop() {
+    if (!canDrop || over) return;
+    const r = FRUITS[currentLv].r;
+    const x = Math.max(WALL + r, Math.min(W - WALL - r, aimX));
+    spawnFruit(x, DROP_Y, currentLv, false);
+    currentLv = nextLv;
+    nextLv = pickNext();
+    nextEl.textContent = FRUITS[nextLv].emoji;
+    canDrop = false;
+    setTimeout(() => { canDrop = true; }, 550);
+  }
+
+  // ===== 합체 =====
+  Events.on(engine, 'collisionStart', e => {
+    for (const pair of e.pairs) {
+      const a = pair.bodyA, b = pair.bodyB;
+      if (a.label === 'fruit') a.touched = true;
+      if (b.label === 'fruit') b.touched = true;
+      if (a.label !== 'fruit' || b.label !== 'fruit') continue;
+      if (a.level !== b.level) continue;
+      if (a.merged || b.merged) continue;         // 함정①: 한 프레임 3개 충돌 이중합체 방지
+      if (a.level === MAX_LEVEL) continue;        // 수박끼리는 합체 없음
+      a.merged = b.merged = true;
+      const nl = a.level + 1;
+      const mx = (a.position.x + b.position.x) / 2;
+      const my = (a.position.y + b.position.y) / 2;
+      World.remove(world, a); World.remove(world, b);
+      spawnFruit(mx, my, nl, true);
+      score += mergeScore(nl);
+      if (nl === MAX_LEVEL) score += WATERMELON_BONUS;
+      scoreEl.textContent = score;
+      effects.push({ x: mx, y: my, r: FRUITS[nl].r, t: 0, pts: mergeScore(nl) + (nl === MAX_LEVEL ? WATERMELON_BONUS : 0) });
+    }
+  });
+
+  // ===== 게임오버 판정 (함정②: 라인 위 '체류 시간'으로 판정) =====
+  function checkGameOver(dt) {
+    const now = performance.now();
+    let danger = false;
+    for (const body of world.bodies) {
+      if (body.label !== 'fruit') continue;
+      if (!body.touched) continue;                        // 낙하 중인 새 과일 제외
+      if (now - body.bornAt < 800) continue;              // 생성 직후 유예
+      if (body.position.y - FRUITS[body.level].r < DEADLINE) { danger = true; break; }
+    }
+    overTimer = danger ? overTimer + dt : 0;
+    if (overTimer > 1000) gameOver();
+    return danger;
+  }
+
+  function gameOver() {
+    over = true;
+    saveBest();
+    document.getElementById('ovScore').textContent = `최종 점수 ${score}점` + (score >= best ? ' — 최고 기록!' : '');
+    document.getElementById('overlay').classList.add('show');
+    document.getElementById('submitBtn').disabled = !LB_ENABLED;
+    document.getElementById('lbmsg').textContent = LB_ENABLED ? '' : '리더보드 비활성 — 파일 상단 SUPABASE 설정을 채워주세요';
+    if (LB_ENABLED) loadRanking();
+  }
+
+  function restart() {
+    for (const body of [...world.bodies]) if (body.label === 'fruit') World.remove(world, body);
+    score = 0; over = false; overTimer = 0; effects = [];
+    currentLv = pickNext(); nextLv = pickNext();
+    scoreEl.textContent = 0;
+    nextEl.textContent = FRUITS[nextLv].emoji;
+    document.getElementById('overlay').classList.remove('show');
+    document.getElementById('submitBtn').disabled = false;
+  }
+
+  // ===== 렌더링 =====
+  function drawFruit(body) {
+    const f = FRUITS[body.level];
+    const { x, y } = body.position;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(body.angle);                    // 함정③: body 각도 적용해 회전 표현
+    ctx.font = `${f.r * 2.1}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(f.emoji, 0, f.r * 0.08);
+    ctx.restore();
+  }
+
+  function render(danger) {
+    // 배경
+    ctx.fillStyle = '#fff8e7';
+    ctx.fillRect(0, 0, W, H);
+    // 벽
+    ctx.fillStyle = '#c98d4b';
+    ctx.fillRect(0, 0, WALL, H);
+    ctx.fillRect(W - WALL, 0, WALL, H);
+    ctx.fillRect(0, H - WALL, W, WALL);
+    // 데드라인
+    ctx.strokeStyle = danger ? 'rgba(224,60,40,.9)' : 'rgba(224,60,40,.35)';
+    ctx.lineWidth = danger ? 5 : 3;
+    ctx.setLineDash([14, 10]);
+    ctx.beginPath();
+    ctx.moveTo(WALL, DEADLINE); ctx.lineTo(W - WALL, DEADLINE);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 조준선 + 대기 과일
+    if (!over) {
+      const f = FRUITS[currentLv];
+      const x = Math.max(WALL + f.r, Math.min(W - WALL - f.r, aimX));
+      ctx.strokeStyle = 'rgba(122,74,18,.2)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, DROP_Y); ctx.lineTo(x, H - WALL);
+      ctx.stroke();
+      ctx.globalAlpha = canDrop ? 1 : 0.45;
+      ctx.font = `${f.r * 2.1}px serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(f.emoji, x, DROP_Y + f.r * 0.08);
+      ctx.globalAlpha = 1;
+    }
+
+    // 과일
+    for (const body of world.bodies) if (body.label === 'fruit') drawFruit(body);
+
+    // 합체 이펙트
+    for (const fx of effects) {
+      const p = fx.t / 400;
+      ctx.globalAlpha = 1 - p;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 6 * (1 - p);
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, fx.r * (0.6 + p * 0.8), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#7a4a12';
+      ctx.font = '26px Jua, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`+${fx.pts}`, fx.x, fx.y - fx.r - 10 - p * 24);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ===== 메인 루프 =====
+  function loop(t) {
+    const dt = Math.min(32, t - lastTime || 16);
+    lastTime = t;
+    if (!over) Engine.update(engine, dt);
+    effects = effects.filter(fx => (fx.t += dt) < 400);
+    const danger = over ? false : checkGameOver(dt);
+    render(danger);
+    requestAnimationFrame(loop);
+  }
+
+  // ===== 입력 (pointer 이벤트로 마우스/터치 통합) =====
+  function toGameX(clientX) {
+    const rect = canvas.getBoundingClientRect();
+    return (clientX - rect.left) / rect.width * W;
+  }
+  canvas.addEventListener('pointerdown', e => { aimX = toGameX(e.clientX); });
+  canvas.addEventListener('pointermove', e => { aimX = toGameX(e.clientX); });
+  canvas.addEventListener('pointerup', e => { aimX = toGameX(e.clientX); drop(); });
+
+  // ===== 리더보드 (Supabase REST — 피하기 게임과 동일 패턴) =====
+  const sbHeaders = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+  };
+  let submittedName = null;
+  async function loadRanking() {
+    const el = document.getElementById('ranking');
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${LB_TABLE}?select=name,score&order=score.desc,id.asc&limit=10`, { headers: sbHeaders });
+      const rows = await res.json();
+      el.innerHTML = rows.map((r, i) =>
+        `<div class="row${r.name === submittedName ? ' me' : ''}"><span>${i + 1}. ${escapeHtml(r.name)}</span><span>${r.score}점</span></div>`
+      ).join('') || '<div class="row">아직 기록이 없어요</div>';
+    } catch {
+      el.innerHTML = '<div class="row">랭킹을 불러오지 못했어요</div>';
+    }
+  }
+  async function submitScore() {
+    const name = document.getElementById('nick').value.trim();
+    if (!name) return;
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/${LB_TABLE}`, {
+        method: 'POST', headers: sbHeaders,
+        body: JSON.stringify({ name, score }),
+      });
+      submittedName = name;
+      document.getElementById('lbmsg').textContent = '등록 완료!';
+      loadRanking();
+    } catch {
+      document.getElementById('lbmsg').textContent = '등록 실패 — 네트워크를 확인해주세요';
+      btn.disabled = false;
+    }
+  }
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  document.getElementById('submitBtn').addEventListener('click', submitScore);
+  document.getElementById('restartBtn').addEventListener('click', restart);
+
+  // ===== 시작 =====
+  layout();
+  loadBest();
+  currentLv = pickNext(); nextLv = pickNext();
+  nextEl.textContent = FRUITS[nextLv].emoji;
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
