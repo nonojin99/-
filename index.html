@@ -90,24 +90,32 @@
   const { Engine, Bodies, Body, World, Events } = Matter;
 
   // ===== 보드/과일 상수 =====
-  const W = 560, H = 760;             // 논리 캔버스 (CSS로 축소)
-  const BX0 = 187, BX1 = 374;         // 박스 = 가운데 1/3 (좌우 1/3 여백)
-  const BOARD_TOP = 190;
+  // 캔버스가 화면을 꽉 채우도록 화면 비율에 맞춰 논리 높이를 결정.
+  // 그래야 박스(가운데 1/3)가 '실제 화면 폭의 1/3'이 됨.
+  const stageEl = document.getElementById('stage');
+  const W = 561;                                     // 논리 폭 (박스 = 정확히 W/3)
+  const ASPECT = stageEl.clientHeight / Math.max(1, stageEl.clientWidth);
+  const H = Math.min(1500, Math.max(680, Math.round(W * ASPECT)));
+  const BX1 = W * 2 / 3;                             // 오른쪽 벽면 유지 (우측 열 보존)
+  const BX0 = BX1 - 280;                             // 왼쪽 여백을 써서 폭 1.5배 (187 → 280)
+  const BOARD_TOP = 130;
+  const BOX_H = Math.min(645, H - BOARD_TOP - 30);   // 높이도 1.5배 (430 → 645), 화면 여유 내에서
+  const BOARD_BOT = BOARD_TOP + BOX_H;
   const WALL = 14;
-  const DEADLINE = BOARD_TOP + 55;    // 게임오버 라인 y
-  const DROP_Y = BOARD_TOP - 45;      // 드롭 대기 높이 (박스 위 공간)
+  const DEADLINE = BOARD_TOP + 80;    // 게임오버 라인 y
+  const DROP_Y = BOARD_TOP - 60;      // 드롭 대기 높이 (박스 위 공간)
   const FRUITS = [
-    { name: '체리',     emoji: '🍒', r: 9  },
-    { name: '딸기',     emoji: '🍓', r: 11 },
-    { name: '포도',     emoji: '🍇', r: 14 },
-    { name: '귤',       emoji: '🍊', r: 17 },
-    { name: '감',       emoji: '🍅', r: 21 },
-    { name: '사과',     emoji: '🍎', r: 25 },
-    { name: '배',       emoji: '🍐', r: 31 },
-    { name: '복숭아',   emoji: '🍑', r: 38 },
-    { name: '파인애플', emoji: '🍍', r: 45 },
-    { name: '멜론',     emoji: '🍈', r: 56 },
-    { name: '수박',     emoji: '🍉', r: 68 },
+    { name: '체리',     emoji: '🍒', r: 12 },
+    { name: '딸기',     emoji: '🍓', r: 15 },
+    { name: '포도',     emoji: '🍇', r: 18 },
+    { name: '귤',       emoji: '🍊', r: 23 },
+    { name: '감',       emoji: '🍅', r: 27 },
+    { name: '사과',     emoji: '🍎', r: 33 },
+    { name: '배',       emoji: '🍐', r: 41 },
+    { name: '복숭아',   emoji: '🍑', r: 50 },
+    { name: '파인애플', emoji: '🍍', r: 60 },
+    { name: '멜론',     emoji: '🍈', r: 74 },
+    { name: '수박',     emoji: '🍉', r: 90 },
   ];
   const MAX_LEVEL = FRUITS.length - 1;
   const DROPPABLE = 5;                                  // 1~5단계만 드롭 등장
@@ -145,17 +153,104 @@
 
   // 물리 원과 시각 크기를 일치시키는 공용 드로잉: 면적 기준(기하평균)으로 맞추고
   // 0.96배 여유를 둬서 맞닿아도 겹쳐 보이지 않게(#3)
-  function drawEmoji(lv, x, y, r, angle) {
+  // opts: { scale, mood, look, blink } — 표정/역동성(#2)
+  function drawEmoji(lv, x, y, r, angle, opts) {
+    const o = opts || {};
     const g = GLYPH[lv];
     const fontPx = (2 * r * 0.96) / Math.sqrt(g.w * g.h);
     ctx.save();
     ctx.translate(x, y);
     if (angle) ctx.rotate(angle);
+    if (o.scale && o.scale !== 1) ctx.scale(o.scale, 1 / o.scale);   // 스쿼시&스트레치
     ctx.font = `${fontPx}px serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(FRUITS[lv].emoji, -g.cx * fontPx, -g.cy * fontPx);
+    drawFace(r, o);
     ctx.restore();
+  }
+
+  // 표정 — 중립(웃음) / 합체 직후(기쁨) / 데드라인 근처(당황)
+  function drawFace(r, o) {
+    const ex = r * 0.34, ey = -r * 0.10;
+    const er = Math.max(2.4, r * 0.16);
+    const mood = o.mood || 'calm';
+    const look = o.look || 0;                       // 속도에 따른 눈동자 쏠림 (-1~1)
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (o.blink) {                                  // 깜빡임
+      ctx.strokeStyle = '#3a2410';
+      ctx.lineWidth = Math.max(1.4, r * 0.075);
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(s * ex - er * 0.8, ey);
+        ctx.lineTo(s * ex + er * 0.8, ey);
+        ctx.stroke();
+      }
+    } else if (mood === 'happy') {                  // ^ ^
+      ctx.strokeStyle = '#3a2410';
+      ctx.lineWidth = Math.max(1.4, r * 0.085);
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(s * ex - er * 0.85, ey + er * 0.5);
+        ctx.lineTo(s * ex, ey - er * 0.55);
+        ctx.lineTo(s * ex + er * 0.85, ey + er * 0.5);
+        ctx.stroke();
+      }
+    } else {
+      const wide = mood === 'panic' ? 1.28 : 1;
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(s * ex, ey, er * wide, er * 1.12 * wide, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#fffdf7';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(s * ex + look * er * 0.4, ey + er * 0.12, er * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#3a2410';
+        ctx.fill();
+      }
+    }
+
+    // 입
+    ctx.strokeStyle = '#3a2410';
+    ctx.lineWidth = Math.max(1.3, r * 0.07);
+    ctx.beginPath();
+    if (mood === 'panic') {
+      ctx.ellipse(0, r * 0.33, r * 0.13, r * 0.17, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#3a2410';
+      ctx.fill();
+    } else if (mood === 'happy') {
+      ctx.arc(0, r * 0.20, r * 0.24, 0.15 * Math.PI, 0.85 * Math.PI);
+      ctx.stroke();
+    } else {
+      ctx.arc(0, r * 0.20, r * 0.18, 0.2 * Math.PI, 0.8 * Math.PI);
+      ctx.stroke();
+    }
+
+    // 볼터치 — 기쁨일 때만
+    if (mood === 'happy' && r > 16) {
+      ctx.fillStyle = 'rgba(240,110,110,.35)';
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(s * r * 0.55, r * 0.16, r * 0.13, r * 0.09, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // 과일 몸체의 표정/애니메이션 상태 계산
+  function fruitOpts(body) {
+    const now = performance.now();
+    const r = FRUITS[body.level].r;
+    const pop = Math.max(0, 1 - (now - body.popAt) / 260);
+    const danger = body.position.y - r < DEADLINE + r * 0.6;
+    return {
+      scale: 1 + 0.22 * Math.sin(pop * Math.PI),
+      mood: pop > 0.15 ? 'happy' : (danger ? 'panic' : 'calm'),
+      look: Math.max(-1, Math.min(1, body.velocity.x / 4)),
+      blink: ((now + body.blinkPhase) % 3600) < 130,
+    };
   }
 
   // ===== 캔버스 =====
@@ -178,9 +273,9 @@
   engine.velocityIterations = 8;
   const wallOpt = { isStatic: true, friction: 0.4, render: {} };
   World.add(world, [
-    Bodies.rectangle((BX0 + BX1) / 2, H + 40, (BX1 - BX0) + 200, 80 + WALL * 2, wallOpt),  // 바닥
-    Bodies.rectangle(BX0 - 40 + WALL / 2, H / 2, 80, H * 2, wallOpt),                      // 왼벽
-    Bodies.rectangle(BX1 + 40 - WALL / 2, H / 2, 80, H * 2, wallOpt),                      // 오른벽
+    Bodies.rectangle((BX0 + BX1) / 2, BOARD_BOT + 40, (BX1 - BX0) + 200, 80, wallOpt),     // 바닥면 = BOARD_BOT
+    Bodies.rectangle(BX0 - 40, H / 2, 80, H * 2, wallOpt),                                 // 왼벽면 = BX0
+    Bodies.rectangle(BX1 + 40, H / 2, 80, H * 2, wallOpt),                                 // 오른벽면 = BX1
   ]);
 
   // ===== 상태 =====
@@ -216,6 +311,8 @@
     body.level = lv;
     body.merged = false;
     body.bornAt = performance.now();
+    body.popAt = fromMerge ? performance.now() : -1e9;
+    body.blinkPhase = Math.random() * 3600;
     body.touched = fromMerge;
     World.add(world, body);
     return body;
@@ -226,7 +323,7 @@
   function drop() {
     if (!canDrop || over) return;
     const r = FRUITS[currentLv].r;
-    const x = Math.max(BX0 + WALL + r, Math.min(BX1 - WALL - r, aimX));
+    const x = Math.max(BX0 + r, Math.min(BX1 - r, aimX));
     spawnFruit(x, DROP_Y, currentLv, false);
     currentLv = nextLv;
     nextLv = pickNext();
@@ -293,26 +390,28 @@
 
   // ===== 렌더링 =====
   function drawNextBox() {
-    // 다음 과일 — 오른쪽 상단, 실제 플레이 크기 그대로(#4)
-    const cx = (BX1 + W) / 2, cy = 130;
+    // 다음 과일 — 박스 옆 오른쪽, 실제 플레이 크기 그대로(#4)
+    const cx = (BX1 + W) / 2, cy = BOARD_TOP + 90;
     ctx.fillStyle = '#a8834e';
     ctx.font = '16px Jua, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('다음', cx, 78);
+    ctx.fillText('다음', cx, BOARD_TOP + 30);
     ctx.strokeStyle = '#d8b985';
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 6]);
     ctx.beginPath();
-    ctx.arc(cx, cy + 12, 34, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 42, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    drawEmoji(nextLv, cx, cy + 12, FRUITS[nextLv].r, 0);
+    drawEmoji(nextLv, cx, cy, FRUITS[nextLv].r, 0, { mood: 'happy' });
   }
 
   function drawEvoRing() {
-    // 진화의 고리 — 오른쪽 하단(#4)
-    const cx = (BX1 + W) / 2, cy = 560, R = 56;
+    // 진화의 고리 — 우측 열, '다음' 아래(#4)
+    const R = 54;
+    const cx = (BX1 + W) / 2;
+    const cy = Math.min(H - R - 32, BOARD_TOP + 250);   // 다음 과일(하단 BOARD_TOP+132)과 겹치지 않게
     ctx.beginPath();
     ctx.arc(cx, cy, R + 28, 0, Math.PI * 2);
     ctx.fillStyle = '#fff3da';
@@ -342,18 +441,18 @@
     ctx.fillRect(0, 0, W, H);
     // 박스 내부
     ctx.fillStyle = '#fff8e7';
-    ctx.fillRect(BX0, BOARD_TOP, BX1 - BX0, H - BOARD_TOP);
+    ctx.fillRect(BX0, BOARD_TOP, BX1 - BX0, BOARD_BOT - BOARD_TOP);
     // 벽
     ctx.fillStyle = '#c98d4b';
-    ctx.fillRect(BX0, BOARD_TOP, WALL, H - BOARD_TOP);
-    ctx.fillRect(BX1 - WALL, BOARD_TOP, WALL, H - BOARD_TOP);
-    ctx.fillRect(BX0, H - WALL, BX1 - BX0, WALL);
+    ctx.fillRect(BX0 - WALL, BOARD_TOP, WALL, BOARD_BOT - BOARD_TOP + WALL);
+    ctx.fillRect(BX1, BOARD_TOP, WALL, BOARD_BOT - BOARD_TOP + WALL);
+    ctx.fillRect(BX0 - WALL, BOARD_BOT, BX1 - BX0 + WALL * 2, WALL);
     // 데드라인
     ctx.strokeStyle = danger ? 'rgba(224,60,40,.9)' : 'rgba(224,60,40,.35)';
     ctx.lineWidth = danger ? 5 : 3;
     ctx.setLineDash([14, 10]);
     ctx.beginPath();
-    ctx.moveTo(BX0 + WALL, DEADLINE); ctx.lineTo(BX1 - WALL, DEADLINE);
+    ctx.moveTo(BX0, DEADLINE); ctx.lineTo(BX1, DEADLINE);
     ctx.stroke();
     ctx.setLineDash([]);
 
@@ -363,20 +462,20 @@
     // 조준선 + 대기 과일
     if (!over) {
       const f = FRUITS[currentLv];
-      const x = Math.max(BX0 + WALL + f.r, Math.min(BX1 - WALL - f.r, aimX));
+      const x = Math.max(BX0 + f.r, Math.min(BX1 - f.r, aimX));
       ctx.strokeStyle = 'rgba(122,74,18,.2)';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(x, DROP_Y); ctx.lineTo(x, H - WALL);
+      ctx.moveTo(x, DROP_Y); ctx.lineTo(x, BOARD_BOT);
       ctx.stroke();
       ctx.globalAlpha = canDrop ? 1 : 0.45;
-      drawEmoji(currentLv, x, DROP_Y, f.r, 0);
+      drawEmoji(currentLv, x, DROP_Y, f.r, 0, { mood: 'calm', look: 0 });
       ctx.globalAlpha = 1;
     }
 
     // 과일 (함정③: body 각도 적용해 회전 표현)
     for (const body of world.bodies) {
-      if (body.label === 'fruit') drawEmoji(body.level, body.position.x, body.position.y, FRUITS[body.level].r, body.angle);
+      if (body.label === 'fruit') drawEmoji(body.level, body.position.x, body.position.y, FRUITS[body.level].r, body.angle, fruitOpts(body));
     }
 
     // 합체 이펙트
