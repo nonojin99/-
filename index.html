@@ -54,6 +54,27 @@
   #ranking .row:nth-child(odd) { background: #f7ecd4; }
   #ranking .me { background: #ffd88a !important; }
   #lbmsg { font-size: 12px; opacity: .7; margin-top: 8px; }
+  #startOverlay {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: linear-gradient(180deg, rgba(255,224,168,.96), rgba(255,205,140,.96));
+  }
+  #startOverlay.show { display: flex; }
+  #startPanel { text-align: center; color: #7a4a12; width: min(320px, 86%); }
+  #startTitle { font-size: 42px; margin-bottom: 6px; }
+  #startSub { font-size: 15px; opacity: .8; margin-bottom: 22px; }
+  #startPanel button {
+    font-family: inherit; font-size: 18px; cursor: pointer; display: block;
+    width: 100%; padding: 13px; border: none; border-radius: 12px;
+    background: #e0533d; color: #fff; margin: 8px 0;
+    box-shadow: 0 4px 0 #b83f2c;
+  }
+  #startPanel button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b83f2c; }
+  #startPanel button.ghost { background: #fff3da; color: #a8834e; box-shadow: 0 4px 0 #e0cba0; }
+  #startPanel button.ghost:active { box-shadow: 0 2px 0 #e0cba0; }
+  #startRanking { margin-top: 14px; text-align: left; font-size: 14px; max-height: 220px; overflow-y: auto; }
+  #startRanking .row { display: flex; justify-content: space-between; padding: 5px 10px; border-radius: 8px; }
+  #startRanking .row:nth-child(odd) { background: rgba(255,255,255,.45); }
 </style>
 </head>
 <body>
@@ -63,6 +84,15 @@
 </div>
 <div id="stage">
   <canvas id="game"></canvas>
+  <div id="startOverlay" class="show">
+    <div id="startPanel">
+      <div id="startTitle">🍉 수박게임</div>
+      <div id="startSub">같은 과일을 합쳐 수박을 만들자!</div>
+      <button id="startBtn">게임 시작</button>
+      <button id="startRankBtn" class="ghost">리더보드 보기</button>
+      <div id="startRanking"></div>
+    </div>
+  </div>
   <div id="overlay">
     <div id="panel">
       <h2 id="ovTitle">게임 오버</h2>
@@ -85,7 +115,7 @@
   const SUPABASE_URL = 'https://fpjgjwazqpfiffnsgume.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_I1YgcnYNBOaGy0WwozO2wQ_PGwsLtU5';
   const LB_TABLE = 'suika_rankings';
-  const LB_ENABLED = !SUPABASE_URL.includes('fpjgjwazqpfiffnsgume');
+  const LB_ENABLED = !SUPABASE_URL.includes('YOUR-PROJECT');
 
   const { Engine, Bodies, Body, World, Events } = Matter;
 
@@ -298,7 +328,7 @@
   ]);
 
   // ===== 상태 =====
-  let score = 0, best = 0, over = false;
+  let score = 0, best = 0, over = false, started = false;
   let currentLv = 0, nextLv = 0;
   let aimX = (BX0 + BX1) / 2;
   let canDrop = true;
@@ -340,7 +370,7 @@
   function pickNext() { return Math.floor(Math.random() * DROPPABLE); }
 
   function drop() {
-    if (!canDrop || over) return;
+    if (!started || !canDrop || over) return;
     const r = FRUITS[currentLv].r;
     const x = Math.max(BX0 + r, Math.min(BX1 - r, aimX));
     spawnFruit(x, DROP_Y, currentLv, false);
@@ -541,8 +571,10 @@
     'Content-Type': 'application/json',
   };
   let submittedName = null;
-  async function loadRanking() {
-    const el = document.getElementById('ranking');
+  async function loadRanking(targetId) {
+    const el = document.getElementById(targetId || 'ranking');
+    if (!LB_ENABLED) { el.innerHTML = '<div class="row">리더보드 비활성 — SUPABASE 설정 필요</div>'; return; }
+    el.innerHTML = '<div class="row">불러오는 중…</div>';
     try {
       const res = await fetch(`${SUPABASE_URL}/rest/v1/${LB_TABLE}?select=name,score&order=score.desc,id.asc&limit=10`, { headers: sbHeaders });
       const rows = await res.json();
@@ -577,7 +609,15 @@
   document.getElementById('submitBtn').addEventListener('click', submitScore);
   document.getElementById('restartBtn').addEventListener('click', restart);
 
-  // ===== 시작 =====
+  // ===== 시작 화면 =====
+  function beginGame() {
+    document.getElementById('startOverlay').classList.remove('show');
+    started = true;
+  }
+  document.getElementById('startBtn').addEventListener('click', beginGame);
+  document.getElementById('startRankBtn').addEventListener('click', () => loadRanking('startRanking'));
+
+  // ===== 부팅 =====
   layout();
   loadBest();
   currentLv = pickNext(); nextLv = pickNext();
