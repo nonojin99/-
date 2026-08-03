@@ -576,7 +576,7 @@
     if (!LB_ENABLED) { el.innerHTML = '<div class="row">리더보드 비활성 — SUPABASE 설정 필요</div>'; return; }
     el.innerHTML = '<div class="row">불러오는 중…</div>';
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/${LB_TABLE}?select=name,score&order=score.desc,id.asc&limit=10`, { headers: sbHeaders });
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/suika_leaderboard?select=name,score&order=score.desc,created_at.asc&limit=10`, { headers: sbHeaders });
       const rows = await res.json();
       el.innerHTML = rows.map((r, i) =>
         `<div class="row${r.name === submittedName ? ' me' : ''}"><span>${i + 1}. ${escapeHtml(r.name)}</span><span>${r.score}점</span></div>`
