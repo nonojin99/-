@@ -122,8 +122,8 @@
 <script>
 (() => {
   // ===== Supabase 설정 — 2048 때와 동일 패턴. 아래 두 값만 채우면 리더보드 활성화 =====
-  const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
-  const SUPABASE_KEY = 'YOUR_PUBLISHABLE_KEY';
+  const SUPABASE_URL = 'https://fpjgjwazqpfiffnsgume.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_I1YgcnYNBOaGy0WwozO2wQ_PGwsLtU5';
   const LB_TABLE = 'suika_rankings';
   const LB_ENABLED = !SUPABASE_URL.includes('YOUR-PROJECT');
 
@@ -550,7 +550,7 @@
     el.textContent = '';
     if (!LB_ENABLED || score <= 0) return;
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/suika_leaderboard?select=score&order=score.desc&limit=100`, { headers: sbHeaders });
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${LB_TABLE}?select=score&order=score.desc&limit=100`, { headers: sbHeaders });
       const rows = await res.json();
       const above = rows.filter(r => r.score > score).length;
       if (above < rows.length || rows.length < 100) el.textContent = `이 점수는 리더보드 ${above + 1}위 상당!`;
@@ -746,7 +746,7 @@
     if (!LB_ENABLED) { el.innerHTML = '<div class="row">리더보드 비활성 — SUPABASE 설정 필요</div>'; return; }
     el.innerHTML = '<div class="row">불러오는 중…</div>';
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/suika_leaderboard?select=name,score&order=score.desc,created_at.asc&limit=10`, { headers: sbHeaders });
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${LB_TABLE}?select=name,score&order=score.desc,created_at.asc&limit=10`, { headers: sbHeaders });
       const rows = await res.json();
       el.innerHTML = rows.map((r, i) =>
         `<div class="row${r.name === submittedName ? ' me' : ''}"><span>${i + 1}. ${escapeHtml(r.name)}</span><span>${r.score}점</span></div>`
@@ -808,6 +808,17 @@
   loadBest();
   currentLv = pickNext(); nextLv = pickNext();
   requestAnimationFrame(loop);
+})();
+</script>
+<script>
+(function(){
+  try{
+    fetch("https://fpjgjwazqpfiffnsgume.supabase.co/rest/v1/play_events",{
+      method:"POST",
+      headers:{apikey:"sb_publishable_I1YgcnYNBOaGy0WwozO2wQ_PGwsLtU5",Authorization:"Bearer sb_publishable_I1YgcnYNBOaGy0WwozO2wQ_PGwsLtU5","Content-Type":"application/json"},
+      body:JSON.stringify({game_id:"-",event:"load"})
+    }).catch(function(){});
+  }catch(e){}
 })();
 </script>
 </body>
